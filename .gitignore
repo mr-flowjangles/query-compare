@@ -48,5 +48,8 @@ htmlcov/
 out/
 *.generated.sql
 
+# DBeaver schema dumps the user pastes locally (may describe internal views)
+schemas/
+
 # Claude Code per-machine settings (keep settings.json shareable)
 .claude/settings.local.json

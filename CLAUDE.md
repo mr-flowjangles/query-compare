@@ -12,8 +12,13 @@ it does not connect to a database.
 
 ## Commands
 
-All commands assume `uv` is on the `PATH` (`$HOME/.local/bin`). The `.venv` is
-created by `uv venv` and is the canonical environment.
+The `Makefile` is the canonical entry point — `make help` lists every target
+and the standard workflow. Prefer `make <target>` over the raw commands below
+when one exists.
+
+All raw commands assume `uv` is on the `PATH` (`$HOME/.local/bin`). The
+`.venv` is created by `uv venv` (or `make install`) and is the canonical
+environment.
 
 ```bash
 # install (editable) with dev extras

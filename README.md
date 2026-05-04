@@ -54,6 +54,36 @@ You provide three things on the command line:
 - Timestamps with time zone are normalized to UTC before compare.
 - Plain `date` / `timestamp without time zone` use NULL-safe equality as-is.
 
+## Quickstart with `make`
+
+The Makefile is the single entry point. `make help` lists every target and
+walks you through the standard workflow.
+
+```bash
+make help                                                # see everything
+make install                                             # one-time setup (creates .venv with uv)
+make helper-query                                        # → paste into DBeaver, run, copy result cell
+make paste-compare OLD=public.old_view \
+                   NEW=public.new_view \
+                   KEY=patient_id                        # → writes out/compare.sql from clipboard
+# open out/compare.sql in DBeaver and run each section
+```
+
+For Docker users (teammates), substitute:
+
+```bash
+make docker-build                                        # one-time
+# save the DBeaver JSON result to schemas/old_view.json
+make docker-compare OLD=public.old_view \
+                    NEW=public.new_view \
+                    KEY=patient_id \
+                    SCHEMA=schemas/old_view.json
+```
+
+The rest of this README covers what the tool does, the comparison semantics,
+and the manual install paths (`uv` / `pip` / Docker) if you'd rather skip
+`make`.
+
 ## Requirements
 
 - macOS, Linux, or Windows.
@@ -309,14 +339,10 @@ confirm row counts and to find rows that exist in only one side.)
 ## Development
 
 ```bash
-# install with dev extras
-uv pip install -e ".[dev]"
-
-# run tests
-uv run pytest -q
-
-# lint
-uv run ruff check .
+make install                  # uv venv + editable install with dev extras
+make test                     # uv run pytest -q
+make lint                     # uv run ruff check .
+make clean                    # remove .venv, caches, out/
 ```
 
 ## Project layout
