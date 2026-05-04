@@ -41,8 +41,8 @@ SQL client) against the database that has both views.
 After `make compare`, the tool prompts you for four things in sequence:
 
 1. **Schema JSON** — paste the result cell from the helper query and press Enter.
-2. **New object name** — fully-qualified, e.g. `public.v_opt_tracker`.
-3. **Old object name** — fully-qualified, e.g. `public.v_opt_tracker_old`.
+2. **New object name** — fully-qualified, e.g. `public.new_view`.
+3. **Old object name** — fully-qualified, e.g. `public.old_view`.
 4. **Join key** — defaults to `record_id` if it's in the schema, otherwise the first `*_id` column. Comma-separated for composite keys.
 
 For scripted runs, the same inputs can be passed as flags via `make compare-file` (see [Quickstart](#quickstart)).
@@ -72,8 +72,8 @@ If you'd rather track the JSON paste in version control or run non-interactively
 
 ```bash
 # save DBeaver result to schemas/old_view.json
-make compare-file OLD=public.v_opt_tracker_old \
-                  NEW=public.v_opt_tracker \
+make compare-file OLD=public.view_old \
+                  NEW=public.view_new \
                   KEY=record_id \
                   SCHEMA=schemas/old_view.json
 ```
@@ -102,7 +102,7 @@ docker run --rm -it -v "$(pwd):/work" query-compare -o /work/out/compare.sql
 
 # Non-interactive (scripted)
 docker run --rm -v "$(pwd):/work" query-compare \
-    --old public.v_opt_tracker_old --new public.v_opt_tracker --key record_id \
+    --old public.old_view --new public.new_view --key record_id \
     --schema /work/schemas/old_view.json -o /work/out/compare.sql
 ```
 
@@ -161,8 +161,8 @@ The tool prompts you for four things:
 ```
 Paste the JSON output of the helper query, then press Enter.
 Schema JSON: [paste the JSON, hit Enter]
-New object name (e.g. public.v_opt_tracker): public.patient_view_v2
-Old object name (e.g. public.v_opt_tracker_old): public.patient_view
+New object name (e.g. public.new_view: public.patient_view_v2
+Old object name (e.g. public.old_view): public.patient_view
 Join key [patient_id] (comma-separated for composite): [Enter to accept default]
 → wrote out/compare.sql
 ```
