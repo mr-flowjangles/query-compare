@@ -38,13 +38,14 @@ SQL client) against the database that has both views.
    └──────────────────────────────────────────────────────┘
 ```
 
-You provide three things on the command line:
+After `make compare`, the tool prompts you for four things in sequence:
 
-- **`--old`** — fully-qualified name of the old view/table (e.g. `public.patient_view`).
-- **`--new`** — fully-qualified name of the new view/table.
-- **`--key`** — the column(s) used to match rows between the two. Comma-separated for composite keys.
+1. **Schema JSON** — paste the result cell from the helper query and press Enter.
+2. **New object name** — fully-qualified, e.g. `public.v_opt_tracker`.
+3. **Old object name** — fully-qualified, e.g. `public.v_opt_tracker_old`.
+4. **Join key** — defaults to `record_id` if it's in the schema, otherwise the first `*_id` column. Comma-separated for composite keys.
 
-…and the JSON schema as either a file (`--schema path.json`) or piped via stdin.
+For scripted runs, the same inputs can be passed as flags via `make compare-file` (see [Quickstart](#quickstart)).
 
 ### Comparison semantics (locked)
 
@@ -54,95 +55,55 @@ You provide three things on the command line:
 - Timestamps with time zone are normalized to UTC before compare.
 - Plain `date` / `timestamp without time zone` use NULL-safe equality as-is.
 
-## Quickstart with `make`
+## Quickstart
 
-The Makefile is the single entry point. `make help` lists every target and
-walks you through the standard workflow.
+The tool runs entirely in Docker. The Makefile is the single entry point —
+`make help` lists every target and walks through the workflow.
 
 ```bash
-make help                                                # see everything
-make install                                             # one-time setup (creates .venv with uv)
-make helper-query                                        # → paste into DBeaver, run, copy result cell
-make paste-compare OLD=public.old_view \
-                   NEW=public.new_view \
-                   KEY=patient_id                        # → writes out/compare.sql from clipboard
+make build                # one-time (and after code changes)
+make helper-query         # → paste into DBeaver, run, copy result cell
+make compare              # interactive: prompts for JSON, new name, old name, key
 # open out/compare.sql in DBeaver and run each section
 ```
 
-For Docker users (teammates), substitute:
+If you'd rather track the JSON paste in version control or run non-interactively
+(CI, scripts), use `compare-file` with a saved schema:
 
 ```bash
-make docker-build                                        # one-time
-# save the DBeaver JSON result to schemas/old_view.json
-make docker-compare OLD=public.old_view \
-                    NEW=public.new_view \
-                    KEY=patient_id \
-                    SCHEMA=schemas/old_view.json
+# save DBeaver result to schemas/old_view.json
+make compare-file OLD=public.v_opt_tracker_old \
+                  NEW=public.v_opt_tracker \
+                  KEY=record_id \
+                  SCHEMA=schemas/old_view.json
 ```
 
-The rest of this README covers what the tool does, the comparison semantics,
-and the manual install paths (`uv` / `pip` / Docker) if you'd rather skip
-`make`.
+The rest of this README covers what the tool does and the comparison
+semantics. If you want to run it without Docker (e.g. for local dev), see
+[Development](#development).
 
 ## Requirements
 
-- macOS, Linux, or Windows.
-- One of: Python 3.12+ (with `uv` or `pip`), **or** Docker.
-- The tool itself never connects to a database — you run the SQL it generates.
+- Docker (Docker Desktop on Mac/Windows, or the Docker engine on Linux).
+- That's it. The tool itself never connects to a database — you run the SQL it generates in DBeaver.
 
-## Install — three options
+## Raw `docker run` (without `make`)
 
-### Option A: Docker (best for sharing across a team)
-
-You need Docker (Docker Desktop on Mac/Windows, or the Docker engine on Linux).
-Build the image once from a checkout of this repo:
+`make` is a thin wrapper. If you'd rather call Docker directly:
 
 ```bash
 docker build -t query-compare .
-```
 
-Then run it. Pass CLI args after the image name; pipe schema JSON via stdin:
-
-```bash
 # Print the helper query
 docker run --rm query-compare --print-helper-query
 
-# Generate compare SQL, JSON via stdin, output to stdout
-pbpaste | docker run --rm -i query-compare \
-    --old public.patient_view --new public.patient_view_v2 --key patient_id
+# Interactive (the daily driver) — note the -it flags so prompts work
+docker run --rm -it -v "$(pwd):/work" query-compare -o /work/out/compare.sql
 
-# Output to a file on the host (mount a directory)
-mkdir -p out
-pbpaste | docker run --rm -i -v "$(pwd)/out:/work" query-compare \
-    --old public.patient_view --new public.patient_view_v2 --key patient_id \
-    -o /work/compare.sql
-# → ./out/compare.sql on the host
-```
-
-A convenience shell alias makes it feel native:
-
-```bash
-alias query-compare='docker run --rm -i -v "$(pwd):/work" query-compare'
-```
-
-### Option B: `uv` (recommended for local dev on the maintainer's machine)
-
-[`uv`](https://docs.astral.sh/uv/) is a fast Python tool installer.
-
-```bash
-# install uv (one-time, system-wide)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# install query-compare globally so it's on your PATH everywhere
-uv tool install .
-```
-
-### Option C: `pip` + venv (fallback)
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# Non-interactive (scripted)
+docker run --rm -v "$(pwd):/work" query-compare \
+    --old public.v_opt_tracker_old --new public.v_opt_tracker --key record_id \
+    --schema /work/schemas/old_view.json -o /work/out/compare.sql
 ```
 
 ## Walkthrough
@@ -192,23 +153,32 @@ Click the cell → copy.
 ### 3. Generate the compare SQL
 
 ```bash
-# Pipe via stdin (paste the JSON inline)
-pbpaste | query-compare \
-    --old public.patient_view \
-    --new public.patient_view_v2 \
-    --key patient_id \
-    -o out/patient_compare.sql
+make compare
 ```
 
-Or save the JSON to a file first:
+The tool prompts you for four things:
+
+```
+Paste the JSON output of the helper query, then press Enter.
+Schema JSON: [paste the JSON, hit Enter]
+New object name (e.g. public.v_opt_tracker): public.patient_view_v2
+Old object name (e.g. public.v_opt_tracker_old): public.patient_view
+Join key [patient_id] (comma-separated for composite): [Enter to accept default]
+→ wrote out/compare.sql
+```
+
+The default join key is auto-suggested from the schema (`record_id` if present,
+otherwise `id`, otherwise the first `*_id` column). Hit Enter to accept it, or
+type a different column name (or `a,b` for a composite key).
+
+If you'd rather pass everything as flags (e.g. from a script):
 
 ```bash
-query-compare \
-    --old public.patient_view \
-    --new public.patient_view_v2 \
-    --key patient_id \
-    --schema schemas/patient_view.json \
-    -o out/patient_compare.sql
+make compare-file \
+    OLD=public.patient_view \
+    NEW=public.patient_view_v2 \
+    KEY=patient_id \
+    SCHEMA=schemas/patient_view.json
 ```
 
 ### 4. Run the generated SQL in DBeaver
@@ -248,13 +218,8 @@ You also know:
 
 ### Sample output — generated SQL
 
-Running:
-
-```bash
-pbpaste | query-compare --old public.person --new public.person_v2 --key id
-```
-
-…produces a `.sql` file with four sections (abbreviated):
+Running `make compare` and feeding it the inputs above produces a `.sql` file
+with four sections (abbreviated):
 
 ```sql
 -- 1. Row count check
@@ -273,7 +238,7 @@ EXCEPT
 SELECT "id" FROM "public"."person";
 
 -- 4. Per-row diff: each non-key column shows 'match' if equal,
---    or 'old | new' if not. Only rows with at least one mismatch are returned.
+--    or 'new | old' if not. Only rows with at least one mismatch are returned.
 WITH joined AS (
     SELECT
         o."id" AS "id",
@@ -286,11 +251,11 @@ WITH joined AS (
 SELECT
     "id",
     CASE WHEN COALESCE("o_name", '') = COALESCE("n_name", '') THEN 'match'
-         ELSE COALESCE("o_name"::text, 'NULL') || ' | ' || COALESCE("n_name"::text, 'NULL') END AS "name",
+         ELSE COALESCE("n_name"::text, 'NULL') || ' | ' || COALESCE("o_name"::text, 'NULL') END AS "name",
     CASE WHEN "o_age" IS NOT DISTINCT FROM "n_age" THEN 'match'
-         ELSE COALESCE("o_age"::text, 'NULL') || ' | ' || COALESCE("n_age"::text, 'NULL') END AS "age",
+         ELSE COALESCE("n_age"::text, 'NULL') || ' | ' || COALESCE("o_age"::text, 'NULL') END AS "age",
     CASE WHEN "o_shoe_size" IS NOT DISTINCT FROM "n_shoe_size" THEN 'match'
-         ELSE COALESCE("o_shoe_size"::text, 'NULL') || ' | ' || COALESCE("n_shoe_size"::text, 'NULL') END AS "shoe_size"
+         ELSE COALESCE("n_shoe_size"::text, 'NULL') || ' | ' || COALESCE("o_shoe_size"::text, 'NULL') END AS "shoe_size"
 FROM joined
 WHERE NOT (
         COALESCE("o_name", '') = COALESCE("n_name", '')
@@ -308,16 +273,16 @@ disagree on a couple. Running §4 in DBeaver returns something like:
 ```
  id  | name          | age   | shoe_size
 -----+---------------+-------+-----------
-  17 | match         | 3 | 2 | match
-  42 | Alice | Alyce | match | 9 | 10
- 108 | match         | match | NULL | 7
+  17 | match         | 2 | 3 | match
+  42 | Alyce | Alice | match | 10 | 9
+ 108 | match         | match | 7 | NULL
 ```
 
-Reading this:
+Reading this (cells are `new | old`):
 
-- **id 17** — `name` and `shoe_size` match; `age` is `3` in old, `2` in new.
+- **id 17** — `name` and `shoe_size` match; `age` is `2` in new, `3` in old.
 - **id 42** — `age` matches; `name` and `shoe_size` both differ.
-- **id 108** — `name` and `age` match; `shoe_size` was NULL in old, `7` in new.
+- **id 108** — `name` and `age` match; `shoe_size` is `7` in new, was NULL in old.
 
 Only rows with at least one mismatch appear, so an empty result set means the
 two views agree on every row that exists in both. (Use §1, §2, and §3 to
@@ -325,11 +290,15 @@ confirm row counts and to find rows that exist in only one side.)
 
 ## CLI reference
 
-| Flag | Required | Default | Notes |
+When run from a TTY with no `--old`, `--new`, `--key`, or `--schema`, the CLI
+enters interactive mode and prompts for each input. Otherwise, it reads from
+flags:
+
+| Flag | Required (flag mode) | Default | Notes |
 |---|---|---|---|
 | `--old` | yes | — | Fully-qualified old view/table name. |
 | `--new` | yes | — | Fully-qualified new view/table name. |
-| `--key` | yes | — | Comma-separated key columns (e.g. `patient_id` or `patient_id,visit_date`). |
+| `--key` | yes | — | Comma-separated key columns (e.g. `record_id` or `patient_id,visit_date`). |
 | `--schema` | no | stdin | Path to JSON schema file. If omitted, JSON is read from stdin. |
 | `--input-format` | no | `json` | `json` (DBeaver helper query result) or `psql` (output of `\d <name>`). |
 | `--dialect` | no | `postgres` | Currently only `postgres`. |
@@ -338,12 +307,22 @@ confirm row counts and to find rows that exist in only one side.)
 
 ## Development
 
+If you're modifying the source, you'll likely want a local Python install for
+fast test/lint loops (Docker rebuilds are slower than running `pytest`
+directly).
+
 ```bash
-make install                  # uv venv + editable install with dev extras
-make test                     # uv run pytest -q
-make lint                     # uv run ruff check .
-make clean                    # remove .venv, caches, out/
+# install uv once, system-wide
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# from this repo:
+uv venv --python 3.12
+uv pip install -e ".[dev]"
+uv run pytest -q
+uv run ruff check .
 ```
+
+Then `make build` to rebuild the Docker image when you're ready to ship.
 
 ## Project layout
 

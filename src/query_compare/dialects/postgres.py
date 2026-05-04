@@ -12,6 +12,8 @@ Comparison rules:
   - text-like columns: COALESCE(col, '') equality (NULL == '')
   - timestamptz / timetz: cast to UTC before compare
   - everything else: IS NOT DISTINCT FROM (NULL-safe)
+  - columns named in `unordered_columns`: split on comma, trim, sort,
+    rejoin both sides, then compare (multiset semantics, NULL == '')
 """
 
 from __future__ import annotations
@@ -41,13 +43,33 @@ def _equal_expr(left: str, right: str, category: TypeCategory) -> str:
     return f"{left} IS NOT DISTINCT FROM {right}"
 
 
+def _unordered_text_equal_expr(left: str, right: str) -> str:
+    """Equal iff both sides have the same multiset of trimmed comma-delimited members.
+
+    NULL and '' both normalize to '' (so they compare equal). Members are
+    trimmed of surrounding whitespace; ordering is ignored; duplicates count.
+    """
+    norm = (
+        "COALESCE("
+        "(SELECT string_agg(trim(t), ', ' ORDER BY trim(t)) "
+        "FROM unnest(string_to_array({col}, ',')) AS u(t)), '')"
+    )
+    return f"{norm.format(col=left)} = {norm.format(col=right)}"
+
+
 def generate(
     old: str,
     new: str,
     key: list[str],
     schema: Schema,
+    *,
+    unordered_columns: frozenset[str] = frozenset(),
 ) -> str:
-    """Render the full comparison .sql script as a single string."""
+    """Render the full comparison .sql script as a single string.
+
+    `unordered_columns` is a set of column names whose values are
+    comma-separated lists where order is not significant.
+    """
     old_q = quote_qualified(old)
     new_q = quote_qualified(new)
 
@@ -61,7 +83,9 @@ def generate(
     parts.append(_section_row_count(old_q, new_q))
     parts.append(_section_missing_keys(old_q, new_q, key_csv, "OLD", "NEW"))
     parts.append(_section_missing_keys(new_q, old_q, key_csv, "NEW", "OLD"))
-    parts.append(_section_per_column_diff(old_q, new_q, key, non_key))
+    parts.append(
+        _section_per_column_diff(old_q, new_q, key, non_key, unordered_columns)
+    )
     return "\n".join(parts)
 
 
@@ -98,9 +122,13 @@ def _section_missing_keys(
 
 
 def _section_per_column_diff(
-    old_q: str, new_q: str, key: list[str], non_key: list[Column]
+    old_q: str,
+    new_q: str,
+    key: list[str],
+    non_key: list[Column],
+    unordered_columns: frozenset[str],
 ) -> str:
-    """Per-row diff: each non-key column either shows 'match' or 'old | new'.
+    """Per-row diff: each non-key column either shows 'match' or 'new | old'.
 
     Only returns rows where at least one column disagrees, so the result set
     stays small even on large views.
@@ -127,12 +155,15 @@ def _section_per_column_diff(
     for c in non_key:
         ocol = quote_ident("o_" + c.name)
         ncol = quote_ident("n_" + c.name)
-        eq = _equal_expr(ocol, ncol, c.category)
+        if c.name in unordered_columns:
+            eq = _unordered_text_equal_expr(ocol, ncol)
+        else:
+            eq = _equal_expr(ocol, ncol, c.category)
         eq_exprs.append(eq)
         case_lines.append(
             f"CASE WHEN {eq} THEN 'match' "
-            f"ELSE COALESCE({ocol}::text, 'NULL') || ' | ' || "
-            f"COALESCE({ncol}::text, 'NULL') END AS {quote_ident(c.name)}"
+            f"ELSE COALESCE({ncol}::text, 'NULL') || ' | ' || "
+            f"COALESCE({ocol}::text, 'NULL') END AS {quote_ident(c.name)}"
         )
 
     key_select = ", ".join(quote_ident(k) for k in key)
@@ -142,7 +173,7 @@ def _section_per_column_diff(
 
     return (
         "-- 4. Per-row diff: each non-key column shows 'match' if equal,\n"
-        "--    or 'old | new' if not. Only rows with at least one mismatch are returned.\n"
+        "--    or 'new | old' if not. Only rows with at least one mismatch are returned.\n"
         "WITH joined AS (\n"
         "    SELECT\n"
         f"        {cte_select}\n"
