@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "query-compare"
+version = "0.1.0"
+description = "Generate SQL to verify two views/tables produce the same data and highlight differences."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Bellese" }]
+dependencies = [
+    # Runtime deps go here. Keep this lean — generator-only tool.
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+query-compare = "query_compare.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/query_compare"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

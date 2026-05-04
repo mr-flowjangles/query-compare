@@ -1,0 +1,19 @@
+# Keep the build context small.
+.git/
+.github/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.idea/
+.vscode/
+.claude/
+out/
+*.generated.sql
+uv.lock
+tests/
