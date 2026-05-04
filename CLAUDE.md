@@ -13,43 +13,33 @@ it does not connect to a database.
 ## Commands
 
 The `Makefile` is the canonical entry point — `make help` lists every target
-and the standard workflow. Prefer `make <target>` over the raw commands below
-when one exists.
-
-All raw commands assume `uv` is on the `PATH` (`$HOME/.local/bin`). The
-`.venv` is created by `uv venv` (or `make install`) and is the canonical
-environment.
+and the standard workflow. Docker is the only supported runtime path for
+end users; local Python (`uv`) is used only for fast dev/test loops.
 
 ```bash
-# install (editable) with dev extras
-uv pip install -e ".[dev]"
+# user-facing (Docker via make)
+make build                                    # build the image (also after code changes)
+make helper-query                             # print the DBeaver helper query
+make compare                                  # interactive: prompts for JSON, new, old, key
+make compare-file OLD=... NEW=... KEY=... SCHEMA=...  # non-interactive (scripts/CI)
 
-# run all tests
-uv run pytest -q
-
-# run a single test file or test
-uv run pytest tests/test_postgres_generator.py -q
+# local dev loop (faster than rebuilding Docker for every change)
+uv venv --python 3.12               # one-time
+uv pip install -e ".[dev]"          # one-time
+uv run pytest -q                    # all tests
 uv run pytest tests/test_postgres_generator.py::test_text_column_uses_coalesce_empty_string -q
-
-# lint
 uv run ruff check .
 
-# print the DBeaver helper query (paste this into DBeaver, run, copy result cell)
-uv run query-compare --print-helper-query
-
-# generate compare SQL from a JSON schema paste (default --input-format json)
-uv run query-compare --old public.old_view --new public.new_view --key id --schema /path/to/schema.json
-echo '[{"name":"id","type":"integer"}, ...]' | uv run query-compare --old ... --new ... --key id
-
-# psql `\d` paste path is still supported as a fallback
-psql -c '\d public.old_view' | uv run query-compare --old ... --new ... --key id --input-format psql
-
-# install globally so `query-compare` is on PATH everywhere
-uv tool install .
-
-# Docker (for sharing the tool with teammates)
+# raw docker (what `make` wraps)
 docker build -t query-compare .
-pbpaste | docker run --rm -i query-compare --old ... --new ... --key id
+docker run --rm query-compare --print-helper-query
+docker run --rm -it -v "$(pwd):/work" query-compare -o /work/out/compare.sql  # interactive
+docker run --rm -v "$(pwd):/work" query-compare \
+    --old ... --new ... --key id --schema /work/schemas/x.json -o /work/out/compare.sql
+
+# psql `\d` paste path is still supported as a fallback (--input-format psql)
+psql -c '\d public.old_view' | docker run --rm -i query-compare \
+    --old ... --new ... --key id --input-format psql
 ```
 
 The `Dockerfile` is `python:3.12-slim` + `pip install .`, with `query-compare`
@@ -61,10 +51,15 @@ output dir there to capture `-o` files).
 The tool is a four-stage pipeline. Reading these in order is the fastest way
 to understand the codebase:
 
-1. **`cli.py`** — argparse entry point. Reads schema text from `--schema` or
-   stdin, parses the `--key` (comma-separated for composite keys), validates
-   that every key column exists in the parsed schema, then dispatches to the
-   chosen dialect.
+1. **`cli.py`** — argparse entry point with two modes:
+   - **Interactive** (default when called from a TTY with no `--old/--new/--key/--schema`):
+     `_interactive_inputs()` prompts in order for JSON, new name, old name, and
+     key. The key prompt offers a smart default via `_guess_key()`
+     (`record_id` → `id` → first `*_id`).
+   - **Flag-driven** (scripts, tests, CI): reads schema text from `--schema` or
+     stdin, parses `--key` (comma-separated for composite keys).
+   Both paths converge on the same validation (key exists in schema) and
+   dialect dispatch. The interactive path is what `make compare` uses.
 
 2. **`parsers/json_schema.py`** (default) — parses a JSON column array
    produced by the DBeaver helper query (see `HELPER_QUERY` in `cli.py` or

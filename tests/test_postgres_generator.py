@@ -84,12 +84,17 @@ def test_skip_column_diff_when_only_key_columns():
 
 def test_diff_section_uses_per_row_match_or_pipe_format():
     sql = generate("public.old_v", "public.new_v", ["id"], _patient_schema())
-    # Each non-key column should be wrapped in CASE WHEN ... THEN 'match' ELSE old || ' | ' || new END
+    # Each non-key column wraps to: CASE WHEN ... THEN 'match' ELSE new || ' | ' || old END
     assert "THEN 'match'" in sql
     assert "' | '" in sql
     # Mismatch cell template uses COALESCE(...::text, 'NULL') so NULLs are visible
     assert "COALESCE(\"o_first_name\"::text, 'NULL')" in sql
     assert "COALESCE(\"n_first_name\"::text, 'NULL')" in sql
+    # Order is new | old (matches the interactive prompt order)
+    assert (
+        "COALESCE(\"n_first_name\"::text, 'NULL') || ' | ' || "
+        "COALESCE(\"o_first_name\"::text, 'NULL')"
+    ) in sql
 
 
 def test_diff_section_filters_to_rows_with_mismatches():
@@ -97,3 +102,57 @@ def test_diff_section_filters_to_rows_with_mismatches():
     # WHERE NOT ( eq AND eq AND eq ) keeps only rows that disagree somewhere
     assert "WHERE NOT (" in sql
     assert "AND" in sql  # multiple equality clauses ANDed
+
+
+def _assignees_schema() -> Schema:
+    return Schema(
+        qualified_name="public.tracker",
+        kind="view",
+        columns=(
+            Column("id", "integer"),
+            Column("assignees", "text"),
+            Column("note", "text"),
+        ),
+    )
+
+
+def test_unordered_column_uses_normalized_set_compare():
+    sql = generate(
+        "public.old_v",
+        "public.new_v",
+        ["id"],
+        _assignees_schema(),
+        unordered_columns=frozenset({"assignees"}),
+    )
+    # The unordered path splits, trims, sorts, and re-joins both sides before comparing.
+    assert 'string_to_array("o_assignees", \',\')' in sql
+    assert 'string_to_array("n_assignees", \',\')' in sql
+    assert "string_agg(trim(t), ', ' ORDER BY trim(t))" in sql
+    # Non-unordered text column still uses the plain COALESCE rule.
+    assert "COALESCE(\"o_note\", '') = COALESCE(\"n_note\", '')" in sql
+
+
+def test_unordered_column_does_not_affect_default_text_compare():
+    sql = generate(
+        "public.old_v",
+        "public.new_v",
+        ["id"],
+        _assignees_schema(),
+    )
+    # Default: assignees uses plain text equality, no string_to_array anywhere.
+    assert "string_to_array" not in sql
+    assert "COALESCE(\"o_assignees\", '') = COALESCE(\"n_assignees\", '')" in sql
+
+
+def test_unordered_column_appears_in_where_clause_too():
+    sql = generate(
+        "public.old_v",
+        "public.new_v",
+        ["id"],
+        _assignees_schema(),
+        unordered_columns=frozenset({"assignees"}),
+    )
+    # The same normalized expression is used in WHERE NOT (...) so a row that
+    # only differs by ordering doesn't get returned.
+    where_idx = sql.index("WHERE NOT (")
+    assert "string_to_array(\"o_assignees\"" in sql[where_idx:]
