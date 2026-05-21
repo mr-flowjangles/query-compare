@@ -1,9 +1,10 @@
-.PHONY: help build helper-query compare compare-file clean _check_compare_file
+.PHONY: help build helper-query compare compare-file ui clean _check_compare_file
 
 .DEFAULT_GOAL := help
 
-IMAGE := query-compare
-OUT   ?= out/compare.sql
+IMAGE    := query-compare
+OUT      ?= out/compare.sql
+UI_PORT  ?= 8501
 
 help: ## Show this help and the standard workflow
 	@echo ""
@@ -21,6 +22,9 @@ help: ## Show this help and the standard workflow
 	@echo "  3a. save the DBeaver result to schemas/old_view.json"
 	@echo "  3b. make compare-file OLD=public.v_opt_tracker_old NEW=public.v_opt_tracker \\"
 	@echo "                        KEY=record_id SCHEMA=schemas/old_view.json"
+	@echo ""
+	@echo "Browser UI alternative:"
+	@echo "  3.  make ui                  # opens http://localhost:8501 with the same inputs"
 	@echo ""
 	@echo "Variables (compare-file only):"
 	@echo "  OLD     fully-qualified old view/table  (e.g. public.v_opt_tracker_old)"
@@ -47,6 +51,12 @@ compare-file: _check_compare_file ## Non-interactive. Vars: OLD NEW KEY SCHEMA [
 	    --old '$(OLD)' --new '$(NEW)' --key '$(KEY)' \
 	    --schema '/work/$(SCHEMA)' -o '/work/$(OUT)'
 	@echo "→ wrote $(OUT)"
+
+ui: ## Launch the Streamlit UI on http://localhost:$(UI_PORT)
+	@echo "→ opening http://localhost:$(UI_PORT) (Ctrl-C to stop)"
+	@docker run --rm -it -p $(UI_PORT):8501 --entrypoint streamlit $(IMAGE) \
+	    run /app/src/query_compare/ui.py \
+	    --server.address=0.0.0.0 --server.port=8501 --server.headless=true
 
 clean: ## Remove out/
 	rm -rf out

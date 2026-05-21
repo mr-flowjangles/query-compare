@@ -19,6 +19,9 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+ui = [
+    "streamlit>=1.36",
+]
 
 [project.scripts]
 query-compare = "query_compare.cli:main"
